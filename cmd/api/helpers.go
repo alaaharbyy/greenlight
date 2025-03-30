@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"maps"
 
@@ -49,32 +50,44 @@ func (app *application) writeJSON(w http.ResponseWriter, status int, data any, h
 }
 
 func (app *application) readJSON(w http.ResponseWriter, r *http.Request, dst any) error {
-	err := json.NewDecoder(r.Body).Decode(dst)
+
+	maxBytes := 1_048_576
+	r.Body = http.MaxBytesReader(w, r.Body, int64(maxBytes))
+
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+
+	err := dec.Decode(dst)
 	if err != nil {
-		// If there is an error during decoding, start the triage...
 		var syntaxError *json.SyntaxError
 		var unmarshalTypeError *json.UnmarshalTypeError
 		var invalidUnmarshalError *json.InvalidUnmarshalError
+		var maxBytesError *http.MaxBytesError
+
 		switch {
-		case errors.As(err, &syntaxError): //syntax err
+		case errors.As(err, &syntaxError):
 			return fmt.Errorf("body contains badly-formated JSON (at character %d)", syntaxError.Offset)
-			//$  curl -d '<?xml version="1.0" encoding="UTF-8"?><note><to>Alex</to></note>' localhost:4000/v1/movies
-			//$ curl -d '{"title": "Moana", }' localhost:4000/v1/movies
-		case errors.Is(err, io.ErrUnexpectedEOF): //syntax err Decode()
+
+		case errors.Is(err, io.ErrUnexpectedEOF):
 			return errors.New("body contains badly-formated JSON")
 
-		case errors.As(err, &unmarshalTypeError): //JSON value is the wrong type for the target destination
+		case errors.As(err, &unmarshalTypeError):
 			if unmarshalTypeError.Field != "" {
 				return fmt.Errorf("body contains incorrect JSON type for field %q", unmarshalTypeError.Field)
 			}
 			return fmt.Errorf("body contans incorrect JSON type (at character %d)", unmarshalTypeError.Offset)
 
-		case errors.Is(err, io.EOF): //Decode() will return this when the json object is empty
+		case errors.Is(err, io.EOF):
 			return errors.New("body must not be empty")
 
-			//$ curl -X POST localhost:4000/v1/movies
+		case strings.HasPrefix(err.Error(), "json: unknown field "):
+			fieldName := strings.TrimPrefix(err.Error(), "json: unknown field ")
+			return fmt.Errorf("body contains unknown key %s", fieldName)
 
-		//if we pass something that is not a non-nil pointer to Decode().
+		case errors.As(err, &maxBytesError):
+			return fmt.Errorf("body must not be larger than %d bytes", maxBytesError.Limit)
+
+			//if we pass something that is not a non-nil pointer to Decode().
 		case errors.As(err, &invalidUnmarshalError):
 			panic(err) //panicking versus returning errors
 
@@ -85,5 +98,29 @@ func (app *application) readJSON(w http.ResponseWriter, r *http.Request, dst any
 
 	}
 
+	err = dec.Decode(&struct{}{})
+	if err != io.EOF {
+		return errors.New("body must only contain a single JSON value")
+	}
+
 	return nil
 }
+
+/*
+what to look dfor when reading a json request:
+
+- request size:
+	- set a max size and use the http.MaxBytesReader() to set the body limit
+	- if body is bigger than the limit you set then check for *http.MaxBytesError
+- syntax errors:
+	- request maybe be badly formated json or not even json in some cases
+	- check for *json.SyntaxError which is returned by the decoder()
+	- also check for io.ErrUnexpectedEOF which is sometimes retunred instead for syntax errors
+- values for json keys:
+	- making sure that each field in the json gets the correct value type
+	- check for a specific field, if not then at a specific index
+	- check for *json.UnmarshalTypeError returned by the decoder()
+- multiple json objects in request:
+	- call the decode() func again using a pointer to an empty anonymous struct
+	- if response aint io.EOF then there are multiple json objects in request
+*/
