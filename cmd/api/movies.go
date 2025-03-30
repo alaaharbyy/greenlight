@@ -6,16 +6,39 @@ import (
 	"time"
 
 	"greenlight.alaa.net/internal/data"
+	"greenlight.alaa.net/internal/validator"
 )
 
 func (app *application) creatMovieHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintln(w, "create a new movie")
+	var input struct {
+		Title   string       `json:"title"`
+		Year    int32        `json:"year,omitempty"`
+		Runtime data.Runtime `json:"runtime"`
+		Genres  []string     `json:"genres"`
+	}
+
+	err := app.readJSON(w, r, &input)
+	if err != nil {
+		app.badRequestResponse(w, r, err)
+		return
+	}
+	// Copy the values from the input struct to a new Movie struct.
+	movie := &data.Movie{Title: input.Title, Year: input.Year, Runtime: input.Runtime, Genres: input.Genres}
+	// Initialize a new Validator.
+	v := validator.New()
+	// Call the ValidateMovie() function and return a response containing the errors if // any of the checks fail.
+	if data.ValidateMovie(v, movie); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+
+	fmt.Fprintf(w, "%+v\n", input)
 }
 
 func (app *application) showMovieHandler(w http.ResponseWriter, r *http.Request) {
 	id, err := app.readIDParam(r)
 	if err != nil {
-		http.NotFound(w, r)
+		app.notFoundResponse(w, r)
 		return
 	}
 
@@ -31,8 +54,7 @@ func (app *application) showMovieHandler(w http.ResponseWriter, r *http.Request)
 
 	err = app.writeJSON(w, http.StatusOK, movie, nil)
 	if err != nil {
-		app.logger.Print(err)
-		http.Error(w, "the server encountered a problem and could not process your request", http.StatusInternalServerError)
+		app.servereErrorResponse(w, r, err)
 		return
 	}
 }
