@@ -13,7 +13,9 @@ import (
 	_ "github.com/lib/pq"
 )
 
-// Declare a string containing the application version number. Later in the book we'll // generate this automatically at build time, but for now we'll just store the version // number as a hard-coded global constant.
+// Declare a string containing the application version number. Later in the book we'll
+// // generate this automatically at build time, but for now we'll just store the version
+// // number as a hard-coded global constant.
 const version = "1.0.0"
 
 // Define a config struct to hold all the configuration settings for our application. // For now, the only configuration settings will be the network port that we want the // server to listen on, and the name of the current operating environment for the
@@ -23,7 +25,10 @@ type config struct {
 	port int
 	env  string
 	db   struct {
-		dsn string
+		dsn          string
+		maxOpenConns int
+		maxIdleConns int
+		maxIdleTime  string
 	}
 }
 
@@ -37,34 +42,42 @@ type application struct {
 func main() {
 	// Declare an instance of the config struct.
 	var cfg config
-	// Read the value of the port and env command-line flags into the config struct. We // default to using the port number 4000 and the environment "development" if no
+	// Read the value of the port and env command-line flags into the config struct. We
+	// default to using the port number 4000 and the environment "development" if no
 	// corresponding flags are provided.
 	flag.IntVar(&cfg.port, "port", 4000, "API server port")
 	flag.StringVar(&cfg.env, "env", "development", "Environment (development|staging|production)")
 
-	// Read the DSN value from the db-dsn command-line flag into the config struct. We
-	// default to using our development DSN if no flag is provided.
-	flag.StringVar(&cfg.db.dsn, "db-dsn", "postgres://greenlight:pa55word@localhost/greenlight", "PostgreSQL DSN")
+	// Read the DSN value , maxOpenConns, maxIdleConns, maxIdleTime from command line flags and set defaults for them
+	// These are all database details
+	flag.StringVar(&cfg.db.dsn, "db-dsn", os.Getenv("GREENLIGHT_DB_DSN"), "PostgreSQL DSN")
+	flag.IntVar(&cfg.db.maxOpenConns, "db-max-open-conns", 25, "PostgreSQL max open connections")
+	flag.IntVar(&cfg.db.maxIdleConns, "db-max-idle-conns", 25, "PostgreSQL max idle connections")
+	flag.StringVar(&cfg.db.maxIdleTime, "db-max-idle-time", "15m", "PostgreSQL max connection idle time")
 
 	flag.Parse()
-	// Initialize a new logger which writes messages to the standard out stream, // prefixed with the current date and time.
+	// Initialize a new logger which writes messages to the standard out stream,
+	// prefixed with the current date and time.
 	logger := log.New(os.Stdout, "", log.Ldate|log.Ltime)
 
 	db, err := openDB(cfg)
 	if err != nil {
 		logger.Fatal(err)
 	}
-	// Defer a call to db.Close() so that the connection pool is closed before the // main() function exits.
+	// Defer a call to db.Close() so that the connection pool is closed before the
+	// main() function exits.
 	defer db.Close()
-	// Also log a message to say that the connection pool has been successfully // established.
+	// Also log a message to say that the connection pool has been successfully
+	//  established.
 	logger.Printf("database connection pool established")
 
-	// Declare an instance of the application struct, containing the config struct and // the logger.
+	// Declare an instance of the application struct, containing the config struct and the logger.
 	app := &application{
 		config: cfg,
 		logger: logger}
 
-	// // Declare a new servemux and add a /v1/healthcheck route which dispatches requests // to the healthcheckHandler method (which we will create in a moment).
+	//Declare a new servemux and add a /v1/healthcheck route which dispatches requests
+	// to the healthcheckHandler method (which we will create in a moment).
 	// mux := http.NewServeMux()
 	// mux.HandleFunc("/v1/healthcheck", app.healthcheckHandler)
 
@@ -91,6 +104,21 @@ func openDB(cfg config) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// maximum (in-use + idle) connections in the pool
+	// passing a value less than or equal to 0 will = no limit.
+	db.SetMaxOpenConns(cfg.db.maxOpenConns)
+	// less than or equal to 0 will mean there is no limit.
+	db.SetMaxIdleConns(cfg.db.maxIdleConns)
+	// Use the time.ParseDuration() function to convert the idle timeout duration string
+	// to a time.Duration type.
+	duration, err := time.ParseDuration(cfg.db.maxIdleTime)
+	if err != nil {
+		return nil, err
+	}
+	// Set the maximum idle timeout.
+	db.SetConnMaxIdleTime(duration)
+
 	// Create a context with a 5-second timeout deadline.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
