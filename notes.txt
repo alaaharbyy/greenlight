@@ -1,0 +1,76 @@
+SetMaxOpenConns()
+
+Set a sensible MaxOpenConns value based on your DB’s capacity and traffic. 
+It helps:
+
+Prevent exhausting DB resources.
+
+Control app behavior under load.
+
+Make performance more predictable.
+
+in postgresql.conf file using the max_connections setting
+
+SetMaxIdleConns()  By default, the maximum number of idle connections is 2.
+
+SetConnMaxLifetime()
+
+SetConnMaxIdleTime()
+
+postgres ---------------------------------------------------------
+
+1-  install postgresql
+2- add the path to env variables to run the commands in dir terminal, u might need to find psql in ur machine first then copy that path 
+and mv to $GOPATH/bin/
+3- psql --version
+4-  sudo -u postgres psql / psql -U postgres -d postgres - connect to psql from terminal 
+PGPASSWORD=yourpassword psql -U postgres -d postgres -h localhost -p 5432
+
+inside postgres:
+5- # CREATE DATABASE greenlight;
+6- # \c greenlight
+------------------------------------
+
+Hint: In PostgreSQL the \ character indicates a meta command. Some other useful
+meta commands are \l to list all databases, \dt to list tables, and \du to list users.
+You can also run \? to see the full list of available meta commands.
+
+----------------
+
+inside greenlight: 
+7- 
+greenlight=# CREATE ROLE greenlight WITH LOGIN PASSWORD 'pa55word';
+CREATE ROLE
+greenlight=# CREATE EXTENSION IF NOT EXISTS citext;
+
+9-to check: psql --host=localhost --dbname=greenlight --username=greenlight OR psql $GREENLIGHT_DB_DSN
+second one only if $GREENLIGHT_DB_DSN is defined terminal flag 
+
+10- i need to grant this new greenlight user some permissions 
+            greenlight=# GRANT ALL ON SCHEMA public TO greenlight
+
+    make sure that current user is the postgres super user 
+            greenlight=#  select current_user;
+            current_user
+            --------------
+            postgres
+
+
+            
+Migration --------------------------------
+
+install from web 
+
+extract files migrate.exe file 
+
+move the .exe file to $GOPATH/bin/
+
+migrate -version
+
+work:
+to create the migration files (pair: up and down)
+$ migrate create -seq -ext=.sql -dir=./migrations create_movies_table
+
+$ migrate -path=./migrations -database=$GREENLIGHT_DB_DSN up
+
+------------------------------------
